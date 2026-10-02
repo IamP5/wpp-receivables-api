@@ -25,7 +25,7 @@ import java.util.Optional;
 public class ConversationJdbcRepository implements ConversationGateway {
 
     private static final String COLUMNS =
-            "id, version, phone_number, customer_id, campaign_id, stage, stage_data, last_inbound_at, created_at, updated_at";
+            "id, version, phone_number, customer_id, campaign_id, stage, stage_data, last_inbound_at, last_outbound_at, created_at, updated_at";
 
     private final DatabaseClient database;
     private final EventJdbcRepository eventRepository;
@@ -72,13 +72,13 @@ public class ConversationJdbcRepository implements ConversationGateway {
     /** The stored state: next version and no pending events, so the caller can keep working on it and save again. */
     private static Conversation persisted(final Conversation c) {
         return Conversation.with(c.id(), c.version() + 1, c.phoneNumber(), c.customerId(), c.campaignId(), c.stage(),
-                c.lastInboundAt(), c.createdAt(), c.updatedAt());
+                c.lastInboundAt(), c.lastOutboundAt(), c.createdAt(), c.updatedAt());
     }
 
     private void create(final Conversation aConversation) {
         final var sql = """
-                INSERT INTO conversations (id, version, phone_number, customer_id, campaign_id, stage, stage_data, is_open, last_inbound_at, created_at, updated_at)
-                VALUES (:id, (:version + 1), :phoneNumber, :customerId, :campaignId, :stage, :stageData, :open, :lastInboundAt, :createdAt, :updatedAt)
+                INSERT INTO conversations (id, version, phone_number, customer_id, campaign_id, stage, stage_data, is_open, last_inbound_at, last_outbound_at, created_at, updated_at)
+                VALUES (:id, (:version + 1), :phoneNumber, :customerId, :campaignId, :stage, :stageData, :open, :lastInboundAt, :lastOutboundAt, :createdAt, :updatedAt)
                 """;
         executeUpdate(sql, aConversation);
     }
@@ -92,6 +92,7 @@ public class ConversationJdbcRepository implements ConversationGateway {
                     stage_data = :stageData,
                     is_open = :open,
                     last_inbound_at = :lastInboundAt,
+                    last_outbound_at = :lastOutboundAt,
                     updated_at = :updatedAt
                 WHERE id = :id AND version = :version
                 """;
@@ -112,6 +113,7 @@ public class ConversationJdbcRepository implements ConversationGateway {
         params.put("stageData", Json.writeValueAsString(c.stage()));
         params.put("open", c.isOpen());
         params.put("lastInboundAt", JdbcUtils.toTimestamp(c.lastInboundAt()));
+        params.put("lastOutboundAt", JdbcUtils.toTimestamp(c.lastOutboundAt()));
         params.put("createdAt", JdbcUtils.toTimestamp(c.createdAt()));
         params.put("updatedAt", JdbcUtils.toTimestamp(c.updatedAt()));
         return this.database.update(sql, params);
@@ -129,6 +131,7 @@ public class ConversationJdbcRepository implements ConversationGateway {
                     campaignId == null ? null : new CampaignId(campaignId),
                     Json.readValue(rs.getString("stage_data"), JourneyStage.typeOf(rs.getString("stage"))),
                     JdbcUtils.getInstant(rs, "last_inbound_at"),
+                    JdbcUtils.getInstant(rs, "last_outbound_at"),
                     JdbcUtils.getInstant(rs, "created_at"),
                     JdbcUtils.getInstant(rs, "updated_at")
             );

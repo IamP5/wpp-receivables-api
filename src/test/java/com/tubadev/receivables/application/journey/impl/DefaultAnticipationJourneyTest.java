@@ -26,12 +26,14 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -39,6 +41,9 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 class DefaultAnticipationJourneyTest extends UseCaseTest {
+
+    private static final Instant NOW = Instant.parse("2026-10-01T15:00:00Z");
+    private static final Instant VALID_UNTIL = NOW.plus(Duration.ofMinutes(30));
 
     @Mock
     private AnticipationGateway anticipationGateway;
@@ -58,7 +63,6 @@ class DefaultAnticipationJourneyTest extends UseCaseTest {
     @Mock
     private EligibilityGateway eligibilityGateway;
 
-    @InjectMocks
     private DefaultAnticipationJourney target;
 
     private Customer maria;
@@ -66,6 +70,7 @@ class DefaultAnticipationJourneyTest extends UseCaseTest {
 
     @BeforeEach
     void setUp() {
+        target = journeyAt(NOW);
         maria = Fixture.Customers.maria();
         conversation = Fixture.Conversations.of(maria);
     }
@@ -108,7 +113,8 @@ class DefaultAnticipationJourneyTest extends UseCaseTest {
 
         final var replies = target.handle(conversation, Optional.of(maria), new Intent.InformAmount(Money.brl("10000")));
 
-        Assertions.assertEquals(new JourneyStage.ReviewingOffer("off_123", Money.brl("10000"), Money.brl("10246.27")), conversation.stage());
+        Assertions.assertEquals(new JourneyStage.ReviewingOffer("off_123", Money.brl("10000"), Money.brl("10246.27"), offer.validUntil()),
+                conversation.stage());
         Assertions.assertEquals(2, replies.size());
         final var details = Assertions.assertInstanceOf(MessageContent.Text.class, replies.getFirst());
         Assertions.assertTrue(details.body().contains("Mercado A"));
@@ -157,7 +163,7 @@ class DefaultAnticipationJourneyTest extends UseCaseTest {
 
         final var replies = target.handle(conversation, Optional.of(maria), new Intent.ConfirmOffer());
 
-        Assertions.assertEquals(new JourneyStage.AwaitingSelfie("off_123", Money.brl("10000"), Money.brl("10246.27"), 0),
+        Assertions.assertEquals(new JourneyStage.AwaitingSelfie("off_123", Money.brl("10000"), Money.brl("10246.27"), VALID_UNTIL, 0),
                 conversation.stage());
         Assertions.assertTrue(((MessageContent.Text) replies.getFirst()).body().contains("selfie"));
         verify(anticipationGateway, never()).request(any(), any());
@@ -236,7 +242,7 @@ class DefaultAnticipationJourneyTest extends UseCaseTest {
 
         final var replies = target.handle(conversation, Optional.of(maria), selfie("selfie-1"));
 
-        Assertions.assertEquals(new JourneyStage.AwaitingSelfie("off_123", Money.brl("10000"), Money.brl("10246.27"), 1),
+        Assertions.assertEquals(new JourneyStage.AwaitingSelfie("off_123", Money.brl("10000"), Money.brl("10246.27"), VALID_UNTIL, 1),
                 conversation.stage());
         final var text = ((MessageContent.Text) replies.getFirst()).body();
         Assertions.assertTrue(text.contains("pouca qualidade"));
@@ -329,6 +335,56 @@ class DefaultAnticipationJourneyTest extends UseCaseTest {
     }
 
     @Test
+    void givenConfirm_whenOfferExpired_shouldPriceAgainInsteadOfAskingSelfie() {
+        reviewing();
+        target = journeyAt(VALID_UNTIL.plusSeconds(1));
+        final var fresh = Fixture.Offers.tenThousand();
+        when(anticipationGateway.offerFor(maria.id(), Money.brl("10000"))).thenReturn(new OfferResult.Offered(fresh));
+
+        final var replies = target.handle(conversation, Optional.of(maria), new Intent.ConfirmOffer());
+
+        Assertions.assertEquals(fresh.validUntil(), ((JourneyStage.ReviewingOffer) conversation.stage()).validUntil());
+        Assertions.assertTrue(((MessageContent.Text) replies.getFirst()).body().contains("expirou"));
+        Assertions.assertInstanceOf(MessageContent.Buttons.class, replies.getLast());
+    }
+
+    @Test
+    void givenSelfie_whenOfferExpired_shouldPriceAgainWithoutBiometrics() {
+        awaitingSelfie(0);
+        target = journeyAt(VALID_UNTIL.plusSeconds(1));
+        when(anticipationGateway.offerFor(maria.id(), Money.brl("10000"))).thenReturn(new OfferResult.Offered(Fixture.Offers.tenThousand()));
+
+        final var replies = target.handle(conversation, Optional.of(maria), selfie("media-1"));
+
+        Assertions.assertInstanceOf(JourneyStage.ReviewingOffer.class, conversation.stage());
+        Assertions.assertTrue(((MessageContent.Text) replies.getFirst()).body().contains("expirou"));
+        verifyNoInteractions(biometricsGateway, mediaGateway);
+        verify(anticipationGateway, never()).request(any(), any());
+    }
+
+    @Test
+    void givenStaleTap_whenReviewing_shouldIgnoreItAndRemindTheOffer() {
+        reviewing();
+        final var stage = conversation.stage();
+
+        final var replies = target.handle(conversation, Optional.of(maria), new Intent.StaleReply(new Intent.DeclineOffer()));
+
+        Assertions.assertEquals(stage, conversation.stage());
+        Assertions.assertEquals(2, replies.size());
+        Assertions.assertTrue(((MessageContent.Text) replies.getFirst()).body().contains("não vale mais"));
+        Assertions.assertEquals(Intent.CONFIRM_OFFER, ((MessageContent.Buttons) replies.getLast()).buttons().getFirst().id());
+    }
+
+    @Test
+    void givenStaleTap_whenSessionJustStarted_shouldShowTheMenu() {
+        final var replies = target.handle(conversation, Optional.of(maria), new Intent.StaleReply(new Intent.ConfirmOffer()));
+
+        Assertions.assertInstanceOf(JourneyStage.MainMenu.class, conversation.stage());
+        Assertions.assertEquals(Intent.ANTICIPATE, ((MessageContent.Buttons) replies.getLast()).buttons().getFirst().id());
+        verify(anticipationGateway, never()).request(any(), any());
+    }
+
+    @Test
     void givenUnknownPhoneNumber_shouldHandoffToAgent() {
         final var replies = target.handle(conversation, Optional.empty(), new Intent.Greeting());
 
@@ -336,9 +392,14 @@ class DefaultAnticipationJourneyTest extends UseCaseTest {
         Assertions.assertEquals(1, replies.size());
     }
 
+    private DefaultAnticipationJourney journeyAt(final Instant now) {
+        return new DefaultAnticipationJourney(anticipationGateway, biometricsGateway, Clock.fixed(now, ZoneOffset.UTC), customerGateway,
+                eligibilityGateway, mediaGateway, issueContract);
+    }
+
     private void awaitingSelfie(final int attempts) {
         reviewing();
-        conversation.execute(new AdvanceTo(new JourneyStage.AwaitingSelfie("off_123", Money.brl("10000"), Money.brl("10246.27"), 0)));
+        conversation.execute(new AdvanceTo(new JourneyStage.AwaitingSelfie("off_123", Money.brl("10000"), Money.brl("10246.27"), VALID_UNTIL, 0)));
         for (var i = 0; i < attempts; i++) {
             conversation.execute(new AdvanceTo(((JourneyStage.AwaitingSelfie) conversation.stage()).retry()));
         }
@@ -353,7 +414,7 @@ class DefaultAnticipationJourneyTest extends UseCaseTest {
 
     private void reviewing() {
         conversation.execute(new AdvanceTo(new JourneyStage.AwaitingAmount(Money.brl("15000"))));
-        conversation.execute(new AdvanceTo(new JourneyStage.ReviewingOffer("off_123", Money.brl("10000"), Money.brl("10246.27"))));
+        conversation.execute(new AdvanceTo(new JourneyStage.ReviewingOffer("off_123", Money.brl("10000"), Money.brl("10246.27"), VALID_UNTIL)));
         verify(anticipationGateway, never()).request(any(), eq("off_123"));
     }
 }

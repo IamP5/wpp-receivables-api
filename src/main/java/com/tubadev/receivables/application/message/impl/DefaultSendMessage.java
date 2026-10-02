@@ -2,6 +2,7 @@ package com.tubadev.receivables.application.message.impl;
 
 import com.tubadev.receivables.application.message.SendMessage;
 import com.tubadev.receivables.domain.conversation.Conversation;
+import com.tubadev.receivables.domain.conversation.ConversationCommand.RegisterOutbound;
 import com.tubadev.receivables.domain.conversation.ConversationGateway;
 import com.tubadev.receivables.domain.exceptions.DomainException;
 import com.tubadev.receivables.domain.message.Message;
@@ -49,7 +50,11 @@ public class DefaultSendMessage extends SendMessage {
         final var aMessage = Message.newOutbound(this.messageGateway.nextId(), aConversation.id(), in.content());
 
         switch (this.messagingGateway.send(aConversation.phoneNumber(), in.content())) {
-            case Accepted(var wamid) -> aMessage.execute(new MarkAccepted(wamid));
+            case Accepted(var wamid) -> {
+                aMessage.execute(new MarkAccepted(wamid));
+                aConversation.execute(new RegisterOutbound(clock.instant()));
+                this.conversationGateway.save(aConversation);
+            }
             case Rejected rejected -> aMessage.execute(new MarkFailed(rejected.describe()));
         }
 

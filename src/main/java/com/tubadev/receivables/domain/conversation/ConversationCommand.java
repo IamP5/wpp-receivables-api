@@ -14,9 +14,22 @@ public sealed interface ConversationCommand extends AssertionConcern {
         }
     }
 
+    /** WhatsApp accepted a message from us (bot or agent): keeps a human handoff alive. */
+    record RegisterOutbound(Instant sentAt) implements ConversationCommand {
+        public RegisterOutbound {
+            this.assertArgumentNotNull(sentAt, "'sentAt' should not be null");
+        }
+    }
+
     record AdvanceTo(JourneyStage next) implements ConversationCommand {
         public AdvanceTo {
             this.assertArgumentNotNull(next, "'next' should not be null");
         }
     }
+
+    /** Ends an idle session; the caller checks {@link Conversation#isIdle} first. */
+    record Expire() implements ConversationCommand {}
+
+    /** An agent finished the human handoff: the next customer message starts a new session with the bot. */
+    record Release() implements ConversationCommand {}
 }

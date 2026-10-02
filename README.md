@@ -83,7 +83,22 @@ To plug in the real services, implement the port in `infrastructure/gateway/...`
                                                                                                                ──▶ contract PDF ──▶ COMPLETED
                                                                                                biometrics ✘ ──▶ retry (3 attempts) ──▶ HUMAN_HANDOFF
    any stage: "parar" ──▶ opt-out + CLOSED      not eligible ──▶ CLOSED      unknown phone ──▶ HUMAN_HANDOFF
+   any open stage: idle ──▶ CLOSED (inactivity / handoff_timeout)      agent release ──▶ CLOSED (handoff_released)
 ```
+
+### Sessions
+
+The WhatsApp chat is one thread per phone number, forever. Sessions live on our side: each `Conversation` row is one run of the journey, and every anticipation has its own session, contract and messages.
+
+- **Ends by outcome**: completed, declined, opted out, not eligible.
+- **Ends by inactivity** (`SessionPolicy`, `journey.*`), checked when the next message arrives (`Conversation.isIdle`):
+  - Bot stages: `journey.session-timeout` (default `30m`, same as the offer validity) without a customer message. The idle session closes as `inactivity` and the message opens a new one.
+  - Human handoff: `journey.handoff-timeout` (default `2h`) without anyone on our side talking. Customer messages don't count, so a handoff nobody picks up can't keep the bot silent forever.
+  - A campaign conversation the customer never answered doesn't expire, so the first reply is still attributed to the campaign.
+- **Agent release**: `POST /api/conversations/{id}/release` closes a handoff as `handoff_released` and tells the customer to send *oi* (only within the 24h window).
+- **Stale buttons**: WhatsApp keeps old buttons tappable. A *Confirmar*/*Cancelar* tap counts only when it comes from the latest message of the current session with that button (matched by the `context.id` of the tap). Otherwise the bot says the button no longer applies and repeats the current step. Stateless buttons (*Antecipar*, campaign quick replies) work any time.
+- **Expired offer**: confirming or sending the selfie after the offer's `validUntil` prices the same amount again, so nobody takes a selfie for an offer that would be refused.
+- A session is separate from Meta's 24h customer service window (which decides free-form vs template) and from Meta's per-message pricing.
 
 - **Intents** (`domain/conversation/journey/Intent`) come from typed text, interactive buttons or template quick replies. For example: "oi", "quero antecipar", "R$ 7.500,00", "10 mil", "1,5 mil", "sim", "cancelar", "parar".
 - **Amounts** typed at any stage go straight to the offer, so "quero antecipar 10 mil" skips the question.
@@ -148,6 +163,7 @@ Sandbox notes:
 | GET | `/api/campaigns/{id}` | status and stats (sent / failed / skipped) |
 | GET | `/api/conversations/{id}` | journey stage + messages with delivery status |
 | POST | `/api/conversations/{id}/messages` | human agent reply (24h window); moves the journey to HUMAN_HANDOFF |
+| POST | `/api/conversations/{id}/release` | agent finishes the handoff; the next customer message goes to the bot |
 | GET | `/api/contracts/{id}` | contract terms, boletos, signature evidence and authenticity code |
 | GET | `/api/contracts/{id}/document` | the contract PDF (same file sent on WhatsApp) |
 
@@ -179,8 +195,9 @@ mvn test -Pintegration
 - Webhooks are processed synchronously. For volume, persist the raw payload (inbox) and process it async, keeping per-phone ordering.
 - The outbox relay assumes a single instance. For more, use `FOR UPDATE SKIP LOCKED` or CDC (Debezium → Kafka) like the reference.
 - Add a partial unique index (one open conversation per phone) on Postgres.
-- Add conversation inactivity timeout and retries for transient send failures.
+- Add retries for transient send failures.
+- Sessions expire lazily (on the next message). A scheduled sweeper would close abandoned sessions on time for funnel metrics, and could send one "still there?" nudge before the 24h window closes.
 - Biometrics on a WhatsApp photo has no liveness check. Real providers usually require their SDK or a web link for liveness, so the production flow will likely send a link (or a WhatsApp Flow) and receive the result by callback. `BiometricsGateway` stays the same.
 - Issuing the contract and uploading the PDF run inside the webhook request. With real providers, move them to the outbox (`ContractIssued`) so a slow provider doesn't make Meta retry the webhook.
 - Replace the API key with OAuth2/JWT for the internal API.
-- Add a "resume bot" action for agents to return a HUMAN_HANDOFF conversation to the menu.
+- Route handoffs to a real agent inbox (Zendesk, Intercom, Chatwoot...) and call the release endpoint from it.

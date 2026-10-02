@@ -2,6 +2,7 @@ package com.tubadev.receivables.infrastructure.rest;
 
 import com.tubadev.receivables.infrastructure.rest.models.req.SendAgentMessageRequest;
 import com.tubadev.receivables.infrastructure.rest.models.res.ConversationResponse;
+import com.tubadev.receivables.infrastructure.rest.models.res.ReleaseConversationResponse;
 import com.tubadev.receivables.infrastructure.rest.models.res.SendAgentMessageResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -31,4 +32,13 @@ public interface ConversationRestApi {
             @ApiResponse(responseCode = "422", description = "Outside the 24h window or conversation finished"),
     })
     ResponseEntity<SendAgentMessageResponse> sendAgentMessage(@PathVariable String id, @RequestBody @Valid SendAgentMessageRequest req);
+
+    @PostMapping(value = "{id}/release", produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(summary = "The agent finishes the handoff: the session closes and the next customer message goes to the bot")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Released (customer_notified is false outside the 24h window)"),
+            @ApiResponse(responseCode = "404", description = "Conversation not found"),
+            @ApiResponse(responseCode = "422", description = "Conversation is not with an agent"),
+    })
+    ResponseEntity<ReleaseConversationResponse> release(@PathVariable String id);
 }

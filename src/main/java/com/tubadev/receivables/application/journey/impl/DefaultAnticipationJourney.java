@@ -19,6 +19,7 @@ import com.tubadev.receivables.domain.conversation.journey.Intent.DeclineOffer;
 import com.tubadev.receivables.domain.conversation.journey.Intent.InformAmount;
 import com.tubadev.receivables.domain.conversation.journey.Intent.OptOut;
 import com.tubadev.receivables.domain.conversation.journey.Intent.SentAttachment;
+import com.tubadev.receivables.domain.conversation.journey.Intent.StaleReply;
 import com.tubadev.receivables.domain.conversation.journey.Intent.WantsAnticipation;
 import com.tubadev.receivables.domain.conversation.journey.JourneyStage;
 import com.tubadev.receivables.domain.conversation.journey.JourneyStage.AwaitingAmount;
@@ -45,6 +46,7 @@ import com.tubadev.receivables.domain.receivable.OfferResult.ExceedsAvailable;
 import com.tubadev.receivables.domain.receivable.OfferResult.NotEligible;
 import com.tubadev.receivables.domain.receivable.OfferResult.Offered;
 
+import java.time.Clock;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -62,7 +64,8 @@ import java.util.Optional;
  *     contract issued and sent as a PDF document with the protocol</li>
  * </ol>
  * "parar" (opt-out) works from any stage. Typing an amount works from any stage too,
- * so "quero antecipar 10 mil" goes straight to the offer.
+ * so "quero antecipar 10 mil" goes straight to the offer. An offer that expired before the confirmation or the selfie
+ * is priced again for the same amount, so the customer never takes a selfie for an offer that would be refused.
  */
 public class DefaultAnticipationJourney extends AnticipationJourney {
 
@@ -70,6 +73,7 @@ public class DefaultAnticipationJourney extends AnticipationJourney {
 
     private final AnticipationGateway anticipationGateway;
     private final BiometricsGateway biometricsGateway;
+    private final Clock clock;
     private final CustomerGateway customerGateway;
     private final EligibilityGateway eligibilityGateway;
     private final MediaGateway mediaGateway;
@@ -78,6 +82,7 @@ public class DefaultAnticipationJourney extends AnticipationJourney {
     public DefaultAnticipationJourney(
             final AnticipationGateway anticipationGateway,
             final BiometricsGateway biometricsGateway,
+            final Clock clock,
             final CustomerGateway customerGateway,
             final EligibilityGateway eligibilityGateway,
             final MediaGateway mediaGateway,
@@ -85,6 +90,7 @@ public class DefaultAnticipationJourney extends AnticipationJourney {
     ) {
         this.anticipationGateway = Objects.requireNonNull(anticipationGateway);
         this.biometricsGateway = Objects.requireNonNull(biometricsGateway);
+        this.clock = Objects.requireNonNull(clock);
         this.customerGateway = Objects.requireNonNull(customerGateway);
         this.eligibilityGateway = Objects.requireNonNull(eligibilityGateway);
         this.mediaGateway = Objects.requireNonNull(mediaGateway);
@@ -105,11 +111,11 @@ public class DefaultAnticipationJourney extends AnticipationJourney {
             // an agent is in charge: the bot only records the messages
             case Turn(HumanHandoff _, _) -> List.of();
 
+            case Turn(_, StaleReply _) -> staleReply(aConversation, customer);
             case Turn(_, OptOut _) -> optOut(aConversation, customer);
             case Turn(_, InformAmount(var amount)) -> offer(aConversation, customer, amount);
 
-            case Turn(ReviewingOffer(var offerId, var requested, var net), ConfirmOffer _) ->
-                    askSelfie(aConversation, new AwaitingSelfie(offerId, requested, net, 0));
+            case Turn(ReviewingOffer stage, ConfirmOffer _) -> confirm(aConversation, customer, stage);
             case Turn(ReviewingOffer _, DeclineOffer _), Turn(AwaitingSelfie _, DeclineOffer _) -> decline(aConversation);
             case Turn(AwaitingSelfie stage, SentAttachment attachment) -> selfie(aConversation, customer, stage, attachment);
             case Turn(_, WantsAnticipation _), Turn(_, ChangeAmount _) -> askAmount(aConversation, customer);
@@ -142,7 +148,7 @@ public class DefaultAnticipationJourney extends AnticipationJourney {
     private List<MessageContent> offer(final Conversation aConversation, final Customer customer, final Money requested) {
         return switch (this.anticipationGateway.offerFor(customer.id(), requested)) {
             case Offered(var offer) -> {
-                advance(aConversation, new ReviewingOffer(offer.offerId(), offer.requestedAmount(), offer.netAmount()));
+                advance(aConversation, new ReviewingOffer(offer.offerId(), offer.requestedAmount(), offer.netAmount(), offer.validUntil()));
                 yield JourneyReplies.offer(offer);
             }
             case ExceedsAvailable(var req, var available) -> {
@@ -158,6 +164,33 @@ public class DefaultAnticipationJourney extends AnticipationJourney {
         };
     }
 
+    private List<MessageContent> confirm(final Conversation aConversation, final Customer customer, final ReviewingOffer stage) {
+        if (stage.isExpired(clock.instant())) {
+            return requote(aConversation, customer, stage.requestedAmount());
+        }
+        return askSelfie(aConversation, new AwaitingSelfie(stage));
+    }
+
+    private List<MessageContent> requote(final Conversation aConversation, final Customer customer, final Money requested) {
+        final var replies = new ArrayList<MessageContent>();
+        replies.add(JourneyReplies.offerExpired());
+        replies.addAll(offer(aConversation, customer, requested));
+        return replies;
+    }
+
+    /** The tap was ignored: say so and repeat what the current step expects. */
+    private List<MessageContent> staleReply(final Conversation aConversation, final Customer customer) {
+        final var replies = new ArrayList<MessageContent>();
+        replies.add(JourneyReplies.staleReply());
+        replies.addAll(switch (aConversation.stage()) {
+            case AwaitingAmount(var available) -> List.of(JourneyReplies.askAmount(available));
+            case ReviewingOffer _ -> List.of(JourneyReplies.offerReminder());
+            case AwaitingSelfie _ -> List.of(JourneyReplies.selfieReminder());
+            default -> menu(aConversation, customer);
+        });
+        return replies;
+    }
+
     private List<MessageContent> askSelfie(final Conversation aConversation, final AwaitingSelfie stage) {
         advance(aConversation, stage);
         return List.of(JourneyReplies.askSelfie());
@@ -171,6 +204,9 @@ public class DefaultAnticipationJourney extends AnticipationJourney {
     ) {
         if (!attachment.isImage()) {
             return List.of(JourneyReplies.selfieNotAnImage());
+        }
+        if (stage.isExpired(clock.instant())) {
+            return requote(aConversation, customer, stage.requestedAmount());
         }
 
         final var photo = this.mediaGateway.download(attachment.media().mediaId()).filter(file -> file.size() > 0);

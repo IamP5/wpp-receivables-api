@@ -4,6 +4,7 @@ import com.tubadev.receivables.AbstractRepositoryTest;
 import com.tubadev.receivables.domain.Fixture;
 import com.tubadev.receivables.domain.conversation.ConversationCommand.AdvanceTo;
 import com.tubadev.receivables.domain.conversation.ConversationCommand.RegisterInbound;
+import com.tubadev.receivables.domain.conversation.ConversationCommand.RegisterOutbound;
 import com.tubadev.receivables.domain.conversation.ConversationEnded;
 import com.tubadev.receivables.domain.conversation.ConversationStarted;
 import com.tubadev.receivables.domain.conversation.journey.JourneyStage;
@@ -72,5 +73,19 @@ class ConversationJdbcRepositoryTest extends AbstractRepositoryTest {
         second.execute(new RegisterInbound(Instant.now()));
 
         Assertions.assertThrows(OptimisticLockingFailureException.class, () -> conversationRepository().save(second));
+    }
+
+    @Test
+    void givenSessionInReview_whenSaved_shouldKeepOfferValidityAndLastOutbound() {
+        final var now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+        final var stage = new JourneyStage.ReviewingOffer("off_1", Money.brl("1000"), Money.brl("1012.40"), now.plus(30, ChronoUnit.MINUTES));
+        final var aConversation = Fixture.Conversations.withInbound(Fixture.Customers.maria(), now);
+        aConversation.execute(new AdvanceTo(stage), new RegisterOutbound(now));
+        conversationRepository().save(aConversation);
+
+        final var actual = conversationRepository().conversationOfId(aConversation.id()).orElseThrow();
+
+        Assertions.assertEquals(stage, actual.stage());
+        Assertions.assertEquals(now, actual.lastOutboundAt());
     }
 }

@@ -3,8 +3,14 @@ package com.tubadev.receivables.domain.conversation;
 import com.tubadev.receivables.domain.AggregateRoot;
 import com.tubadev.receivables.domain.campaign.CampaignId;
 import com.tubadev.receivables.domain.conversation.ConversationCommand.AdvanceTo;
+import com.tubadev.receivables.domain.conversation.ConversationCommand.Expire;
 import com.tubadev.receivables.domain.conversation.ConversationCommand.RegisterInbound;
+import com.tubadev.receivables.domain.conversation.ConversationCommand.RegisterOutbound;
+import com.tubadev.receivables.domain.conversation.ConversationCommand.Release;
 import com.tubadev.receivables.domain.conversation.journey.JourneyStage;
+import com.tubadev.receivables.domain.conversation.journey.JourneyStage.Closed;
+import com.tubadev.receivables.domain.conversation.journey.JourneyStage.Completed;
+import com.tubadev.receivables.domain.conversation.journey.JourneyStage.HumanHandoff;
 import com.tubadev.receivables.domain.customer.CustomerId;
 import com.tubadev.receivables.domain.exceptions.DomainException;
 import com.tubadev.receivables.domain.message.MessageContent;
@@ -15,8 +21,9 @@ import java.time.Duration;
 import java.time.Instant;
 
 /**
- * One run of the anticipation journey with a WhatsApp user. It owns the journey stage and the
- * 24h customer service window rule of the WhatsApp Business Platform.
+ * One session of the anticipation journey with a WhatsApp user: it starts with a greeting or a campaign and ends with an
+ * outcome or by inactivity ({@link SessionPolicy}). It owns the journey stage and the 24h customer service window rule
+ * of the WhatsApp Business Platform.
  */
 public class Conversation extends AggregateRoot<ConversationId> {
 
@@ -28,6 +35,7 @@ public class Conversation extends AggregateRoot<ConversationId> {
     private CampaignId campaignId;
     private JourneyStage stage;
     private Instant lastInboundAt;
+    private Instant lastOutboundAt;
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -39,6 +47,7 @@ public class Conversation extends AggregateRoot<ConversationId> {
             final CampaignId aCampaignId,
             final JourneyStage aStage,
             final Instant lastInboundAt,
+            final Instant lastOutboundAt,
             final Instant createdAt,
             final Instant updatedAt
     ) {
@@ -49,6 +58,7 @@ public class Conversation extends AggregateRoot<ConversationId> {
         this.setCampaignId(aCampaignId);
         this.setStage(aStage);
         this.setLastInboundAt(lastInboundAt);
+        this.setLastOutboundAt(lastOutboundAt);
         this.setCreatedAt(createdAt);
         this.setUpdatedAt(updatedAt);
     }
@@ -65,7 +75,7 @@ public class Conversation extends AggregateRoot<ConversationId> {
     ) {
         final var now = InstantUtils.now();
         final var aConversation = new Conversation(anId, 0, aPhoneNumber, aCustomerId, aCampaignId,
-                new JourneyStage.Started(), null, now, now);
+                new JourneyStage.Started(), null, null, now, now);
         aConversation.registerEvent(new ConversationStarted(aConversation));
         return aConversation;
     }
@@ -78,10 +88,12 @@ public class Conversation extends AggregateRoot<ConversationId> {
             final CampaignId aCampaignId,
             final JourneyStage aStage,
             final Instant lastInboundAt,
+            final Instant lastOutboundAt,
             final Instant createdAt,
             final Instant updatedAt
     ) {
-        return new Conversation(anId, version, aPhoneNumber, aCustomerId, aCampaignId, aStage, lastInboundAt, createdAt, updatedAt);
+        return new Conversation(anId, version, aPhoneNumber, aCustomerId, aCampaignId, aStage, lastInboundAt, lastOutboundAt,
+                createdAt, updatedAt);
     }
 
     public void execute(final ConversationCommand... cmds) {
@@ -92,7 +104,10 @@ public class Conversation extends AggregateRoot<ConversationId> {
         for (var cmd : cmds) {
             switch (cmd) {
                 case RegisterInbound(var receivedAt) -> applyInbound(receivedAt);
+                case RegisterOutbound(var sentAt) -> applyOutbound(sentAt);
                 case AdvanceTo(var next) -> applyAdvance(next);
+                case Expire _ -> applyAdvance(new Closed(stage instanceof HumanHandoff ? Closed.HANDOFF_TIMEOUT : Closed.INACTIVITY));
+                case Release _ -> applyRelease();
             }
         }
 
@@ -101,6 +116,18 @@ public class Conversation extends AggregateRoot<ConversationId> {
 
     public boolean isOpen() {
         return !this.stage.isTerminal();
+    }
+
+    /**
+     * Whether the session should end before handling a new customer message. A campaign conversation the customer never
+     * answered is not idle: its first reply still belongs to (and is attributed to) the campaign.
+     */
+    public boolean isIdle(final Instant now, final SessionPolicy policy) {
+        return switch (this.stage) {
+            case Completed _, Closed _ -> false;
+            case HumanHandoff _ -> isOlderThan(lastOutboundAt == null ? createdAt : lastOutboundAt, policy.handoffTimeout(), now);
+            default -> lastInboundAt != null && isOlderThan(lastInboundAt, policy.idleTimeout(), now);
+        };
     }
 
     public boolean isWithinServiceWindow(final Instant now) {
@@ -142,6 +169,10 @@ public class Conversation extends AggregateRoot<ConversationId> {
         return lastInboundAt;
     }
 
+    public Instant lastOutboundAt() {
+        return lastOutboundAt;
+    }
+
     public Instant createdAt() {
         return createdAt;
     }
@@ -154,6 +185,23 @@ public class Conversation extends AggregateRoot<ConversationId> {
         if (this.lastInboundAt == null || receivedAt.isAfter(this.lastInboundAt)) {
             this.setLastInboundAt(receivedAt);
         }
+    }
+
+    private void applyOutbound(final Instant sentAt) {
+        if (this.lastOutboundAt == null || sentAt.isAfter(this.lastOutboundAt)) {
+            this.setLastOutboundAt(sentAt);
+        }
+    }
+
+    private void applyRelease() {
+        if (!(this.stage instanceof HumanHandoff)) {
+            throw DomainException.with("Conversation %s is not with an agent (stage: %s)".formatted(id.value(), stage.value()));
+        }
+        applyAdvance(new Closed(Closed.HANDOFF_RELEASED));
+    }
+
+    private static boolean isOlderThan(final Instant instant, final Duration timeout, final Instant now) {
+        return !now.isBefore(instant.plus(timeout));
     }
 
     private void applyAdvance(final JourneyStage next) {
@@ -196,6 +244,10 @@ public class Conversation extends AggregateRoot<ConversationId> {
 
     private void setLastInboundAt(final Instant lastInboundAt) {
         this.lastInboundAt = lastInboundAt;
+    }
+
+    private void setLastOutboundAt(final Instant lastOutboundAt) {
+        this.lastOutboundAt = lastOutboundAt;
     }
 
     private void setCreatedAt(final Instant createdAt) {

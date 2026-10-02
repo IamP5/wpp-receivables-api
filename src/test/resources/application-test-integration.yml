@@ -27,6 +27,16 @@ mock:
       name: Carlos Rocha
       phone-number: "5511966662222"
       opted-in: true
+    - id: cus_session
+      name: Paula Reis
+      phone-number: "5511955553333"
+      opted-in: true
+      receivables:
+        - { payer-name: "Mercado Sessão", amount: 3500.00, due-in-days: 30 }
+    - id: cus_handoff
+      name: Rafael Dias
+      phone-number: "5511944444444"
+      opted-in: true
     - id: cus_us
       name: John Smith
       phone-number: "15555550188"

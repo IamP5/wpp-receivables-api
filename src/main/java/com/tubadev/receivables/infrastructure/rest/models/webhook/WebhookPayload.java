@@ -41,8 +41,14 @@ public record WebhookPayload(String object, List<Entry> entry) {
             MediaBody document,
             MediaBody audio,
             MediaBody video,
-            MediaBody sticker
+            MediaBody sticker,
+            Context context
     ) {
+
+        /** The wamid of the message this one answers: set on button taps and on quoted replies. */
+        public String replyTo() {
+            return context == null ? null : context.id();
+        }
 
         public MessageContent toContent() {
             final var content = switch (type == null ? "" : type) {
@@ -60,6 +66,8 @@ public record WebhookPayload(String object, List<Entry> entry) {
             return content == null ? new MessageContent.Unsupported(type) : content;
         }
     }
+
+    public record Context(String from, String id) {}
 
     public record TextBody(String body) {}
 

@@ -63,6 +63,8 @@ class DefaultSendMessageTest extends UseCaseTest {
         Assertions.assertEquals("wamid.out", out.wamid());
         Assertions.assertEquals(MessageStatus.ACCEPTED, out.status());
         verify(messagingGateway).send(conversation.phoneNumber(), new MessageContent.Text("Olá"));
+        Assertions.assertEquals(NOW, conversation.lastOutboundAt());
+        verify(conversationGateway).save(conversation);
     }
 
     @Test
@@ -77,6 +79,8 @@ class DefaultSendMessageTest extends UseCaseTest {
 
         Assertions.assertEquals(MessageStatus.FAILED, out.status());
         Assertions.assertEquals("[130497] Business account is restricted", out.failureReason());
+        Assertions.assertNull(conversation.lastOutboundAt());
+        verify(conversationGateway, never()).save(any());
     }
 
     @Test

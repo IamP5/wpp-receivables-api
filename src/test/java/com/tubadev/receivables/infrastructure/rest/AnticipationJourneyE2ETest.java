@@ -11,6 +11,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -136,6 +137,59 @@ class AnticipationJourneyE2ETest {
     }
 
     @Test
+    void givenIdleSession_whenCustomerTapsAnOldOffer_shouldStartANewSessionAndIgnoreTheTap() throws Exception {
+        final var phone = "5511955553333";
+        webhook(textMessage(phone, "quero 3.000", Instant.now().minus(Duration.ofMinutes(31))));
+        final var expired = conversationIdOf("cus_session");
+        final var offerWamid = jdbcClient.sql("""
+                        SELECT wamid FROM messages WHERE conversation_id = :id AND content_type = 'buttons' ORDER BY created_at DESC LIMIT 1
+                        """)
+                .param("id", expired).query(String.class).single();
+
+        webhook(buttonReply(phone, "CONFIRM_OFFER", "Confirmar", offerWamid));
+
+        final var current = conversationIdOf("cus_session");
+        Assertions.assertNotEquals(expired, current);
+        mvc.perform(get("/conversations/{id}", expired).header("X-Api-Key", API_KEY))
+                .andExpect(jsonPath("$.stage").value("closed"))
+                .andExpect(jsonPath("$.stage_data.reason").value("inactivity"));
+        mvc.perform(get("/conversations/{id}", current).header("X-Api-Key", API_KEY))
+                .andExpect(jsonPath("$.stage").value("main_menu"))
+                // the tap + "this button is no longer valid" + menu
+                .andExpect(jsonPath("$.messages", hasSize(3)))
+                .andExpect(jsonPath("$.messages[1].content.body").value(containsString("não vale mais")));
+    }
+
+    @Test
+    void givenAgentHandoff_whenReleased_shouldGiveTheCustomerBackToTheBot() throws Exception {
+        final var phone = "5511944444444";
+        webhook(textMessage(phone, "oi"));
+        final var handoff = conversationIdOf("cus_handoff");
+
+        mvc.perform(post("/conversations/{id}/messages", handoff)
+                        .header("X-Api-Key", API_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"text\": \"Olá, aqui é a Ana. Como posso ajudar?\"}"))
+                .andExpect(status().isCreated());
+
+        webhook(textMessage(phone, "oi"));
+        Assertions.assertEquals(handoff, conversationIdOf("cus_handoff"));
+        Assertions.assertEquals("human_handoff", stageOf(handoff));
+
+        mvc.perform(post("/conversations/{id}/release", handoff).header("X-Api-Key", API_KEY))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.stage").value("closed"))
+                .andExpect(jsonPath("$.customer_notified").value(true));
+        mvc.perform(post("/conversations/{id}/release", handoff).header("X-Api-Key", API_KEY))
+                .andExpect(status().isUnprocessableContent());
+
+        webhook(textMessage(phone, "oi"));
+        final var next = conversationIdOf("cus_handoff");
+        Assertions.assertNotEquals(handoff, next);
+        Assertions.assertEquals("main_menu", stageOf(next));
+    }
+
+    @Test
     void givenUnknownContract_shouldReturnNotFound() throws Exception {
         mvc.perform(get("/contracts/{id}", "nope").header("X-Api-Key", API_KEY)).andExpect(status().isNotFound());
     }
@@ -225,6 +279,15 @@ class AnticipationJourneyE2ETest {
                 .query(String.class).single();
     }
 
+    private String conversationIdOf(final String customerId) {
+        return jdbcClient.sql("SELECT id FROM conversations WHERE customer_id = :customerId ORDER BY created_at DESC LIMIT 1")
+                .param("customerId", customerId).query(String.class).single();
+    }
+
+    private String stageOf(final String conversationId) {
+        return jdbcClient.sql("SELECT stage FROM conversations WHERE id = :id").param("id", conversationId).query(String.class).single();
+    }
+
     private String currentStage() {
         return jdbcClient.sql("SELECT stage FROM conversations WHERE id = :id").param("id", latestConversationId())
                 .query(String.class).single();
@@ -235,10 +298,14 @@ class AnticipationJourneyE2ETest {
     }
 
     private static String textMessage(final String from, final String text) {
+        return textMessage(from, text, Instant.now());
+    }
+
+    private static String textMessage(final String from, final String text, final Instant sentAt) {
         return envelope("""
                 "contacts": [{ "profile": { "name": "Maria" }, "wa_id": "%s" }],
                 "messages": [{ "from": "%s", "id": "%s", "timestamp": "%d", "type": "text", "text": { "body": "%s" } }]
-                """.formatted(from, from, wamid(), Instant.now().getEpochSecond(), text));
+                """.formatted(from, from, wamid(), sentAt.getEpochSecond(), text));
     }
 
     private static String buttonReply(final String id, final String title) {
@@ -248,6 +315,16 @@ class AnticipationJourneyE2ETest {
                   "interactive": { "type": "button_reply", "button_reply": { "id": "%s", "title": "%s" } }
                 }]
                 """.formatted(WA_ID, wamid(), Instant.now().getEpochSecond(), id, title));
+    }
+
+    private static String buttonReply(final String from, final String id, final String title, final String replyTo) {
+        return envelope("""
+                "messages": [{
+                  "from": "%s", "id": "%s", "timestamp": "%d", "type": "interactive",
+                  "context": { "from": "15551471409", "id": "%s" },
+                  "interactive": { "type": "button_reply", "button_reply": { "id": "%s", "title": "%s" } }
+                }]
+                """.formatted(from, wamid(), Instant.now().getEpochSecond(), replyTo, id, title));
     }
 
     private static String image(final String mediaId) {

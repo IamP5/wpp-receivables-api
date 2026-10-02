@@ -106,6 +106,18 @@ public final class JourneyReplies {
         return new Buttons("Para seguir, confirme a proposta acima, altere o valor ou cancele.", List.of(CONFIRM, CHANGE, DECLINE));
     }
 
+    public static MessageContent offerExpired() {
+        return new Text("Essa proposta expirou. ⏱️ Calculei de novo com as condições de agora:");
+    }
+
+    public static MessageContent staleReply() {
+        return new Text("Esse botão é de uma mensagem anterior e não vale mais. Use as opções abaixo. 👇");
+    }
+
+    public static MessageContent handoffReleased() {
+        return new Text("Seu atendimento foi encerrado. Quando quiser, envie *oi* para ver as opções de novo.");
+    }
+
     public static MessageContent askSelfie() {
         return new Text("""
                 Para sua segurança, precisamos confirmar que é você. 📸

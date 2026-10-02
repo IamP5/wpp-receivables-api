@@ -53,6 +53,11 @@ whatsapp:
 campaign:
   dispatch-concurrency: 20
 
+# --- Session lifecycle -----------------------------------------------------------------------------
+journey:
+  session-timeout: ${JOURNEY_SESSION_TIMEOUT:30m}   # no customer message → the next one starts a new session (= mock.offer-ttl)
+  handoff-timeout: ${JOURNEY_HANDOFF_TIMEOUT:2h}    # no agent message → the customer goes back to the bot
+
 outbox:
   relay:
     enabled: true

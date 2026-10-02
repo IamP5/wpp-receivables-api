@@ -62,12 +62,14 @@ public class WebhookMediator {
     }
 
     private void handleMessage(final InboundMessage message) {
-        record Input(String wamid, String from, MessageContent content, Instant receivedAt) implements HandleInboundMessage.Input {}
+        record Input(String wamid, String from, MessageContent content, Instant receivedAt, String replyTo)
+                implements HandleInboundMessage.Input {}
 
         try {
             final var receivedAt = InstantUtils.fromEpochSeconds(message.timestamp());
             final var out = this.handleInboundMessage.execute(new Input(
-                    message.id(), message.from(), message.toContent(), receivedAt == null ? InstantUtils.now() : receivedAt));
+                    message.id(), message.from(), message.toContent(), receivedAt == null ? InstantUtils.now() : receivedAt,
+                    message.replyTo()));
             LOG.info("Inbound processed [wamid:{}] [conversation:{}] [stage:{}] [replies:{}] [duplicated:{}]",
                     message.id(), out.conversationId().value(), out.stage(), out.repliesSent(), out.duplicated());
         } catch (final Exception ex) {

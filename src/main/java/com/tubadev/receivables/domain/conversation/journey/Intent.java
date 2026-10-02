@@ -41,6 +41,19 @@ public sealed interface Intent {
     }
     record FreeText(String text) implements Intent {}
     record Unrecognized() implements Intent {}
+    /**
+     * A tap on a button that no longer applies: it belongs to an earlier session, or a newer message offered the same
+     * button (e.g. "Confirmar" on an offer that was replaced by another amount).
+     */
+    record StaleReply(Intent intended) implements Intent {}
+
+    /**
+     * Buttons whose effect depends on the message they came from. The others (anticipate, menu, opt-out) mean the same
+     * thing whenever they are tapped, so old campaign and menu buttons keep working.
+     */
+    default boolean dependsOnContext() {
+        return this instanceof ConfirmOffer || this instanceof DeclineOffer;
+    }
 
     static Intent of(final MessageContent content) {
         return switch (content) {
