@@ -1,0 +1,45 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:receivables;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+
+whatsapp:
+  adapter: mock
+  phone-number-id: "1357259444133753"
+  verify-token: test-verify-token
+  app-secret: test-app-secret
+
+outbox:
+  relay:
+    enabled: false
+
+security:
+  api-key: test-api-key
+
+mock:
+  customers:
+    - id: cus_idempotency
+      name: Ana Lima
+      phone-number: "5511977771111"
+      opted-in: true
+    - id: cus_campaign
+      name: Carlos Rocha
+      phone-number: "5511966662222"
+      opted-in: true
+    - id: cus_us
+      name: John Smith
+      phone-number: "15555550188"
+      opted-in: true
+      receivables:
+        - { payer-name: "Mercado US", amount: 2000.00, due-in-days: 30 }
+    - id: cus_test
+      name: Maria Silva
+      document: "11222333000181"
+      document-type: cnpj
+      phone-number: "5511988887777"
+      opted-in: true
+      receivables:
+        - { payer-name: "Mercado A", amount: 3000.00, due-in-days: 30 }
+        - { payer-name: "Mercado B", amount: 5000.00, due-in-days: 60 }
+        - { payer-name: "Mercado C", amount: 8000.00, due-in-days: 90 }

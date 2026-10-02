@@ -1,0 +1,10 @@
+postgres:
+  host: ${POSTGRES_HOST:localhost:5432}
+  database: ${POSTGRES_DB:receivables}
+  username: ${POSTGRES_USER:receivables}
+  password: ${POSTGRES_PASSWORD:receivables}
+
+# The Meta development app can only message US numbers (BR recipients fail with error 130497),
+# so in development anything outside these country codes is rejected before calling the Graph API.
+whatsapp:
+  allowed-country-codes: ${WHATSAPP_ALLOWED_COUNTRY_CODES:1}
