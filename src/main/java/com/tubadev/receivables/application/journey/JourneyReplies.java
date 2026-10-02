@@ -30,7 +30,6 @@ public final class JourneyReplies {
     private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("dd/MM 'às' HH:mm", PT_BR);
 
     private static final Button ANTICIPATE = new Button(Intent.ANTICIPATE, "Antecipar boletos");
-    private static final Button AGENT = new Button(Intent.TALK_TO_AGENT, "Falar com atendente");
     private static final Button CONFIRM = new Button(Intent.CONFIRM_OFFER, "Confirmar");
     private static final Button CHANGE = new Button(Intent.CHANGE_AMOUNT, "Alterar valor");
     private static final Button DECLINE = new Button(Intent.DECLINE_OFFER, "Cancelar");
@@ -42,7 +41,7 @@ public final class JourneyReplies {
         return new Buttons("""
                 Olá, %s! 👋
                 Aqui você antecipa seus boletos e recebe o dinheiro na conta, sem burocracia.
-                Como posso ajudar?""".formatted(firstName), List.of(ANTICIPATE, AGENT));
+                Como posso ajudar?""".formatted(firstName), List.of(ANTICIPATE));
     }
 
     public static MessageContent askAmount(final Money available) {
@@ -151,7 +150,7 @@ public final class JourneyReplies {
     }
 
     public static MessageContent contractUnavailable(final String protocol) {
-        return new Text("Seu contrato (protocolo *%s*) foi gerado. Se precisar de uma cópia, digite *atendente*.".formatted(protocol));
+        return new Text("Seu contrato (protocolo *%s*) foi gerado. Guarde o número do protocolo.".formatted(protocol));
     }
 
     public static MessageContent anticipationRequested(final String protocol, final Money netAmount, final LocalDate creditDate) {
@@ -169,15 +168,11 @@ public final class JourneyReplies {
     public static MessageContent notEligible() {
         return new Text("""
                 No momento você não tem boletos disponíveis para antecipação.
-                Assim que houver, avisamos por aqui. Se precisar, digite *atendente*.""");
+                Assim que houver, avisamos por aqui.""");
     }
 
     public static MessageContent declined() {
         return new Text("Tudo bem, a proposta foi cancelada. Quando quiser antecipar, é só mandar um *oi*. 😉");
-    }
-
-    public static MessageContent handoff() {
-        return new Text("Certo! Vou te transferir para um dos nossos atendentes. Em instantes alguém continua por aqui. 🙋");
     }
 
     public static MessageContent unknownCustomer() {

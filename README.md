@@ -77,16 +77,15 @@ To plug in the real services, implement the port in `infrastructure/gateway/...`
  "oi" / campaign template
           │
        STARTED ──▶ MAIN_MENU ──[Antecipar boletos]──▶ AWAITING_AMOUNT ──"10 mil"──▶ REVIEWING_OFFER ──[Confirmar]──▶ AWAITING_SELFIE
-                      │                                  ▲     │                     │   │                          │  📸 selfie
-                      │                                  └─────┴──[Alterar valor]────┘   └─[Cancelar]──▶ CLOSED     ▼
-                      │                                                                        biometrics ✔ ──▶ anticipation requested
-                      │                                                                                        ──▶ contract PDF ──▶ COMPLETED
-                      │                                                                        biometrics ✘ ──▶ retry (3 attempts) ──▶ HUMAN_HANDOFF
-                      └─[Falar com atendente]──▶ HUMAN_HANDOFF (bot silent; agent replies via API)
+                                                         ▲     │                     │   │                          │  📸 selfie
+                                                         └─────┴──[Alterar valor]────┘   └─[Cancelar]──▶ CLOSED     ▼
+                                                                                               biometrics ✔ ──▶ anticipation requested
+                                                                                                               ──▶ contract PDF ──▶ COMPLETED
+                                                                                               biometrics ✘ ──▶ retry (3 attempts) ──▶ HUMAN_HANDOFF
    any stage: "parar" ──▶ opt-out + CLOSED      not eligible ──▶ CLOSED      unknown phone ──▶ HUMAN_HANDOFF
 ```
 
-- **Intents** (`domain/conversation/journey/Intent`) come from typed text, interactive buttons or template quick replies. For example: "oi", "quero antecipar", "R$ 7.500,00", "10 mil", "1,5 mil", "sim", "cancelar", "atendente", "parar".
+- **Intents** (`domain/conversation/journey/Intent`) come from typed text, interactive buttons or template quick replies. For example: "oi", "quero antecipar", "R$ 7.500,00", "10 mil", "1,5 mil", "sim", "cancelar", "parar".
 - **Amounts** typed at any stage go straight to the offer, so "quero antecipar 10 mil" skips the question.
 - **Selfie / biometrics**: confirming the offer asks for a selfie. The image is downloaded through the Cloud API media endpoint and validated by `BiometricsGateway`. A non-image gets a "send a photo" reply, and 3 rejected selfies hand the customer to an agent.
 - **Contract**: once the anticipation is requested, `IssueContract` creates a `Contract` aggregate (assignor snapshot, boletos, prices, signature evidence and a SHA-256 authenticity code), renders the PDF, stores both and the bot sends the PDF as a WhatsApp document. While the mocks are on, the PDF carries a "sem validade jurídica" banner and watermark (`contract.disclaimer`). The clauses are a template for the legal team to review.

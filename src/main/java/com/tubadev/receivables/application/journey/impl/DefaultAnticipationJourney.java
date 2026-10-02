@@ -19,7 +19,6 @@ import com.tubadev.receivables.domain.conversation.journey.Intent.DeclineOffer;
 import com.tubadev.receivables.domain.conversation.journey.Intent.InformAmount;
 import com.tubadev.receivables.domain.conversation.journey.Intent.OptOut;
 import com.tubadev.receivables.domain.conversation.journey.Intent.SentAttachment;
-import com.tubadev.receivables.domain.conversation.journey.Intent.TalkToAgent;
 import com.tubadev.receivables.domain.conversation.journey.Intent.WantsAnticipation;
 import com.tubadev.receivables.domain.conversation.journey.JourneyStage;
 import com.tubadev.receivables.domain.conversation.journey.JourneyStage.AwaitingAmount;
@@ -62,7 +61,7 @@ import java.util.Optional;
  *     <li>selfie → biometric validation (up to 3 attempts, then an agent takes over) → anticipation requested →
  *     contract issued and sent as a PDF document with the protocol</li>
  * </ol>
- * "parar" (opt-out) and "atendente" (handoff) work from any stage. Typing an amount works from any stage too,
+ * "parar" (opt-out) works from any stage. Typing an amount works from any stage too,
  * so "quero antecipar 10 mil" goes straight to the offer.
  */
 public class DefaultAnticipationJourney extends AnticipationJourney {
@@ -107,7 +106,6 @@ public class DefaultAnticipationJourney extends AnticipationJourney {
             case Turn(HumanHandoff _, _) -> List.of();
 
             case Turn(_, OptOut _) -> optOut(aConversation, customer);
-            case Turn(_, TalkToAgent _) -> handoff(aConversation, "customer_request");
             case Turn(_, InformAmount(var amount)) -> offer(aConversation, customer, amount);
 
             case Turn(ReviewingOffer(var offerId, var requested, var net), ConfirmOffer _) ->
@@ -246,11 +244,6 @@ public class DefaultAnticipationJourney extends AnticipationJourney {
         this.customerGateway.optOut(customer.id());
         advance(aConversation, new Closed("opted_out"));
         return List.of(JourneyReplies.optedOut());
-    }
-
-    private List<MessageContent> handoff(final Conversation aConversation, final String reason) {
-        advance(aConversation, new HumanHandoff(reason));
-        return List.of(JourneyReplies.handoff());
     }
 
     private List<MessageContent> unknownCustomer(final Conversation aConversation) {

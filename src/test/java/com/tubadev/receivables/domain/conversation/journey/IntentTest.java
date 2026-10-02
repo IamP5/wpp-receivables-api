@@ -17,7 +17,6 @@ class IntentTest extends UnitTest {
             "menu, Greeting",
             "Quero antecipar, WantsAnticipation",
             "simular, WantsAnticipation",
-            "Falar com atendente, TalkToAgent",
             "PARAR, OptOut",
             "sim, ConfirmOffer",
             "Confirmo, ConfirmOffer",

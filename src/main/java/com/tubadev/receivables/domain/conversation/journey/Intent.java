@@ -21,7 +21,6 @@ public sealed interface Intent {
 
     /** Reply ids used in interactive buttons and in the quick-reply buttons of campaign templates. */
     String ANTICIPATE = "ANTICIPATE";
-    String TALK_TO_AGENT = "TALK_TO_AGENT";
     String CONFIRM_OFFER = "CONFIRM_OFFER";
     String CHANGE_AMOUNT = "CHANGE_AMOUNT";
     String DECLINE_OFFER = "DECLINE_OFFER";
@@ -34,7 +33,6 @@ public sealed interface Intent {
     record ConfirmOffer() implements Intent {}
     record ChangeAmount() implements Intent {}
     record DeclineOffer() implements Intent {}
-    record TalkToAgent() implements Intent {}
     record OptOut() implements Intent {}
     record SentAttachment(Media media) implements Intent {
         public boolean isImage() {
@@ -56,7 +54,6 @@ public sealed interface Intent {
     private static Intent fromReply(final String id, final String title) {
         return switch (id.toUpperCase(Locale.ROOT)) {
             case ANTICIPATE -> new WantsAnticipation();
-            case TALK_TO_AGENT -> new TalkToAgent();
             case CONFIRM_OFFER -> new ConfirmOffer();
             case CHANGE_AMOUNT -> new ChangeAmount();
             case DECLINE_OFFER -> new DeclineOffer();
@@ -71,7 +68,6 @@ public sealed interface Intent {
         final var text = normalize(body);
 
         if (Keywords.OPT_OUT.contains(text)) return new OptOut();
-        if (Keywords.containsAny(text, Keywords.AGENT)) return new TalkToAgent();
         if (Keywords.containsAny(text, Keywords.CHANGE)) return new ChangeAmount();
         if (Keywords.DECLINE.contains(text)) return new DeclineOffer();
         if (Keywords.CONFIRM.contains(text)) return new ConfirmOffer();
@@ -99,7 +95,6 @@ public sealed interface Intent {
 
     final class Keywords {
         static final Set<String> OPT_OUT = Set.of("parar", "sair", "stop", "descadastrar", "nao quero mais receber");
-        static final Set<String> AGENT = Set.of("atendente", "humano", "falar com alguem", "falar com uma pessoa");
         static final Set<String> CHANGE = Set.of("alterar valor", "outro valor", "mudar valor", "mudar o valor", "trocar valor");
         static final Set<String> DECLINE = Set.of("cancelar", "nao", "desistir", "nao quero");
         static final Set<String> CONFIRM = Set.of("confirmar", "confirmo", "sim", "aceito", "pode seguir", "ok");
